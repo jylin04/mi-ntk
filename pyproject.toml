@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mi-ntk"          # what `pip list` will show
+version = "0.0.1"
+authors = [{name = "Your Name"}]
+
+# Tell setuptools your top-level modules (no packages folder needed!)
+[tool.setuptools]
+py-modules = ["tms", "tms_fixed", "analysis"]
