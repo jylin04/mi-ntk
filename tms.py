@@ -64,13 +64,13 @@ def importance_weighted_loss(input: t.Tensor, labels: t.Tensor, importance: t.Te
     return (importance * (input - labels)**2).mean()
 
 
-def train_tms(model: nn.Module, opt: t.optim.Optimizer, batch_size: int = 1024, n_features: int = 80, S: float = 0.9, I: float = 0.9) -> t.Tensor:
+def train_tms(model: nn.Module, opt: t.optim.Optimizer, batch_size: int = 1024, n_features: int = 80, S: float = 0.9, I: float = 0.9, device: str="cpu") -> t.Tensor:
     """
     Trains the model on the TMS data and loss function for one epoch and returns the average loss.
     Note that TMS generates a fresh dataset during each epoch.
     """
     # Generate dataset
-    data = generate_batch(batch_size, n_features, S)
+    data = generate_batch(batch_size, n_features, S, device)
 
     # Training loop
     opt.zero_grad()
