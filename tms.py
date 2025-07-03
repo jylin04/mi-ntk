@@ -2,7 +2,6 @@
 Models, dataset and training loop to replicate baseline experiment 
 in "Toy Models of Superposition" https://transformer-circuits.pub/2022/toy_model/index.html
 """
-import numpy as np
 import torch as t
 import torch.nn as nn
 
