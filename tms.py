@@ -28,7 +28,7 @@ class ReluModel(nn.Module):
     A 2-layer MLP with a Relu activation and shared weights: y = ReLU(W^TW x + b)
     """
     def __init__(self, n_features: int, n_hidden: int) -> None:
-        super().__init()
+        super().__init__()
         self.W = nn.Parameter(nn.init.xavier_normal_(t.empty(n_hidden, n_features)))
         self.b = nn.Parameter(t.zeros(n_features))
 
