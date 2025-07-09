@@ -142,4 +142,3 @@ def r2_score(
     den = t.sum((y_full - y_full.mean()) ** 2)
 
     return 1 - num / den.item()
-# %%
