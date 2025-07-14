@@ -1,5 +1,5 @@
 """
-Implementation of the empirical NTK, the linearized approximation to a trained model that follows from it, and helper functions to test whether it's a good approximation.
+Implementation of the empirical NTK, the linearized approximation to a trained model that follows from it, and assorted helper functions.
 
 Note that functorch is deprecated; to make this code future-proof we should migrate it to torch.func.
 """
@@ -142,3 +142,24 @@ def r2_score(
     den = t.sum((y_full - y_full.mean()) ** 2)
 
     return 1 - num / den.item()
+
+
+def eig_decompose(ntk: t.Tensor, topk: int | None = None) -> tuple[t.Tensor, t.Tensor]:
+    """
+    Return the top k eigenvalues and eigenvectors of a NTK matrix.
+
+    Input: ntk = (N, N) t.Tensor
+    Output: eigvals = (m,) t. Tensor (m = N or topk)
+    Output: eigvecs = (N,m)t. Tensor
+    """
+    eigvals, eigvecs = t.linalg.eigh(ntk)
+
+    # Sort by descending order
+    eigvals = eigvals.flip(0)
+    eigvecs = eigvecs.flip(1)
+
+    if topk is not None:
+        eigvals = eigvals[:topk]
+        eigvecs = eigvecs[:, :topk]
+
+    return eigvals, eigvecs
