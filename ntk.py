@@ -152,6 +152,10 @@ def eig_decompose(ntk: t.Tensor, topk: int | None = None) -> tuple[t.Tensor, t.T
     Output: eigvals = (m,) t. Tensor (m = N or topk)
     Output: eigvecs = (N,m)t. Tensor
     """
+    # Condition with small ridge
+    diag_mean = ntk.diag().mean()
+    ntk += 1e-8 * diag_mean * t.eye(ntk.shape[0], device=ntk.device)
+
     eigvals, eigvecs = t.linalg.eigh(ntk)
 
     # Sort by descending order
