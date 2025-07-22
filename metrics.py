@@ -1,6 +1,11 @@
 """
 Feature map, R^2, reconstruction error and other utilities to make comparison plots.
 """
+import torch as t
+import torch.nn as nn
+
+from typing import Tuple
+
 
 def loss_acc_gap(
     model: nn.Module,
