@@ -1,5 +1,5 @@
 """
-Implementation of the empirical NTK, the linearized approximation to a trained model that follows from it, and assorted helper functions.
+Implementation of the Jacobian, empirical NTK, linearized approximation to a trained model that follows from it, and assorted helper functions.
 
 Note that functorch is deprecated; to make this code future-proof we should migrate it to torch.func.
 """
@@ -11,10 +11,10 @@ from functorch import make_functional, jacrev, vmap
 from typing import Tuple
 
 
-def empirical_ntk(model: nn.Module, x_1: t.Tensor, x_2: t.Tensor) -> t.Tensor:
+def full_jacobian(model: nn.Module, x: t.Tensor) -> t.Tensor:
     """
-    Returns NTK(x_1, x_2), of shape (N_1, N_2, C_1, C_2)
-    where N_1 = len(x_1), N_2= len(x_2) and C_* are the output dims.
+    Returns J of shape (N, C, P) where
+    N = len(x), C = output dims, and P = parameter count.
     """
     model = model.eval()
     fmodel, params = make_functional(model)
@@ -23,7 +23,41 @@ def empirical_ntk(model: nn.Module, x_1: t.Tensor, x_2: t.Tensor) -> t.Tensor:
     def fnet_single(params: Tuple[t.Tensor, ...], x: t.Tensor) -> t.Tensor:
         return fmodel(params, x.unsqueeze(0)).squeeze(0)
 
-    # Jacobians. jacrev returns a per-sample function jac_fn(params, x) -> Tuple[T.Tensor, ...]. vmap vectorizes it letting us loop over the batch.
+    jac = vmap(jacrev(fnet_single), (None, 0))(
+        params, x
+    )  # Tuple[t.Tensor...] with one entry per parameter of size *S_i, where jac[i] has shape(N_1, C_1, *S_i).
+    jac = [
+        j.flatten(start_dim=2) for j in jac
+    ]  # Concat params into one axis. jac[i] has shape [N, C, P_i]
+
+    return t.cat(jac, dim=2)
+
+
+def class_jacobian(model: nn.Module, x: t.Tensor, class_idx: int) -> t.Tensor:
+    """
+    Return J_class of shape (N, P) for the specified output index.
+    """
+
+    j_full = full_jacobian(model, x)
+    return j_full[:, class_idx, :]
+
+
+def empirical_ntk(model: nn.Module, x_1: t.Tensor, x_2: t.Tensor) -> t.Tensor:
+    """
+    Returns NTK(x_1, x_2), of shape (N_1, N_2, C_1, C_2)
+    where N_1 = len(x_1), N_2= len(x_2) and C_* are the output dims.
+    """
+    # TODO: Could replace jacrev+vmap block with full_jacobian.
+
+    model = model.eval()
+    fmodel, params = make_functional(model)
+
+    # Function that runs a single example
+    def fnet_single(params: Tuple[t.Tensor, ...], x: t.Tensor) -> t.Tensor:
+        return fmodel(params, x.unsqueeze(0)).squeeze(0)
+
+    # Jacobians. jacrev returns a per-sample function jac_fn(params, x) -> Tuple[T.Tensor, ...].
+    # vmap vectorizes it letting us loop over the batch.
     jac1 = vmap(jacrev(fnet_single), (None, 0))(
         params, x_1
     )  # Tuple[t.Tensor...] with one entry per parameter of size *S_i, where jac[i] has shape(N_1, C_1, *S_i).
@@ -95,53 +129,6 @@ class LinearisedPredictor:
 
         else:
             return (K_q @ self.alpha).reshape(B, self.C)
-
-
-def loss_acc_gap(
-    model: nn.Module,
-    lin_model: LinearisedPredictor,
-    x_val: t.Tensor,
-    y_val: t.Tensor,
-    loss_fn=t.nn.functional.mse_loss,
-    expand_around_model: bool = True,
-) -> Tuple[float, float]:
-    """
-    Returns (the ratio of the loss function evaluated on the eNTK approximation vs. on the full model,
-    the percent difference between the accuracy of the eNTK approximation and the full model).
-    """
-
-    y_lin = lin_model(x_val, expand_around_model).detach()
-    y_full = model(x_val).detach()
-
-    loss_lin = loss_fn(y_lin, y_val).item()
-    loss_full = loss_fn(y_full, y_val).item()
-    loss_ratio = loss_lin / loss_full
-
-    acc_lin = (y_lin.argmax(1) == y_val.argmax(1)).float().mean().item()
-    acc_full = (y_full.argmax(1) == y_val.argmax(1)).float().mean().item()
-    acc_gap = (acc_full - acc_lin) * 100
-
-    return loss_ratio, acc_gap
-
-
-def r2_score(
-    model: nn.Module,
-    lin_model: LinearisedPredictor,
-    x_val: t.Tensor,
-    expand_around_model: bool = True,
-) -> float:
-    """
-    Returns R2 score = 1 - residual sum of squares / total sum of squares.
-    If the predictor were perfect, R2 would be 1; if no better than predicting the mean every time, R2 would be 0; values close to 1 are better.
-    """
-
-    y_lin = lin_model(x_val, expand_around_model).detach()
-    y_full = model(x_val).detach()
-
-    num = t.sum((y_lin - y_full) ** 2)
-    den = t.sum((y_full - y_full.mean()) ** 2)
-
-    return 1 - num / den.item()
 
 
 def eig_decompose(ntk: t.Tensor, topk: int | None = None) -> tuple[t.Tensor, t.Tensor]:

@@ -9,4 +9,4 @@ authors = [{name = "Your Name"}]
 
 # Tell setuptools your top-level modules (no packages folder needed!)
 [tool.setuptools]
-py-modules = ["tms", "tms_fixed", "ntk"]
+py-modules = ["tms", "ntk", "metrics"]
