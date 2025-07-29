@@ -220,7 +220,7 @@ def learn_dictionary_supervised(
 
     # Supervised head
     C = y_target.shape[1]
-    head = nn.Linear(k, C, bias=False).to(device)
+    head = nn.Linear(k, C, bias=False).to(Jt.device)
 
     opt = t.optim.Adam([A, S, head.weight], lr=lr)
 
