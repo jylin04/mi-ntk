@@ -154,3 +154,90 @@ def eig_decompose(ntk: t.Tensor, topk: int | None = None) -> tuple[t.Tensor, t.T
         eigvecs = eigvecs[:, :topk]
 
     return eigvals, eigvecs
+
+
+def learn_dictionary_torch(
+    J: t.Tensor,
+    k: int,
+    lam_l1: float = 0.0,
+    lam_ortho: float = 0.0,
+    lr: float = 3e-3,
+    n_steps: int = 1000,
+) -> Tuple[t.Tensor, t.Tensor]:
+    """
+    Returns A: (P, k)  learned atoms and S: (k, N*C) learned codes
+    """
+    Jt = J.T.detach()
+
+    # PCA initializaiton
+    U, Sigma, Vt = t.linalg.svd(Jt, full_matrices=False)  # Jᵀ = U Σ Vᵀ
+    A0 = U[:, :k]
+    S0 = t.diag(Sigma[:k]) @ Vt[:k]
+
+    # Dictionary learning
+    A = nn.Parameter(A0)
+    S = nn.Parameter(S0)
+
+    opt = t.optim.Adam([A, S], lr=lr)
+
+    for step in range(n_steps):
+
+        opt.zero_grad()
+
+        dictionary_loss = ((Jt - A @ S) ** 2).mean() + lam_l1 * S.abs().mean()
+        ortho = lam_ortho * ((A.T @ A - t.eye(k, device=A.device)) ** 2).mean()
+        tot_loss = dictionary_loss + ortho
+
+        tot_loss.backward()
+        opt.step()
+
+    return A.detach(), S.detach()
+
+
+def learn_dictionary_supervised(
+    J: t.Tensor,
+    y_target: t.Tensor,
+    k: int,
+    lam_l1: float = 0.0,
+    lam_ortho: float = 0.0,
+    lam_sup: float = 0.0,
+    lr: float = 3e-3,
+    n_steps: int = 1000,
+) -> Tuple[t.Tensor, t.Tensor]:
+    """
+    y_target should be shape (N*C, C)
+    Returns A: (P,k) learned atoms, S(k, N*C) learned codes, and the trained linear head W : (n_out,k)
+    """
+    Jt = J.T.detach()
+
+    # PCA initialization
+    U, Sigma, Vt = t.linalg.svd(Jt, full_matrices=False)  # Jᵀ = U Σ Vᵀ
+    A0 = U[:, :k]
+    S0 = t.diag(Sigma[:k]) @ Vt[:k]
+
+    A = nn.Parameter(A0)
+    S = nn.Parameter(S0)
+
+    # Supervised head
+    C = y_target.shape[1]
+    head = nn.Linear(k, C, bias=False).to(device)
+
+    opt = t.optim.Adam([A, S, head.weight], lr=lr)
+
+    for step in range(n_steps):
+
+        opt.zero_grad()
+
+        y_pred = head(S.T)
+
+        dictionary_loss = ((Jt - A @ S) ** 2).mean() + lam_l1 * S.abs().mean()
+        ortho = lam_ortho * ((A.T @ A - t.eye(k, device=A.device)) ** 2).mean()
+
+        sup = lam_sup * nn.functional.mse_loss(y_pred, y_target)
+
+        tot_loss = dictionary_loss + ortho + sup
+
+        tot_loss.backward()
+        opt.step()
+
+    return A.detach(), S.detach(), head
