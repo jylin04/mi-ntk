@@ -13,8 +13,14 @@ from typing import Tuple
 
 def full_jacobian(model: nn.Module, x: t.Tensor) -> t.Tensor:
     """
-    Returns J of shape (N, C, P) where
-    N = len(x), C = output dims, and P = parameter count.
+    Computes the full Jacobian of a pytorch model wrt its parameters, evaluated on a batch of inputs.
+
+    Args:
+        model: a Pytorch nn.Module.
+        x: t.Tensor of shape (N, *S) for N the batch size and S the input shape expected by the model.
+
+    Returns:
+        J: t.Tensor of shape (N,C,P) for C the output shape expected by the model and P the model's parameter count.
     """
     model = model.eval()
     fmodel, params = make_functional(model)
@@ -35,7 +41,7 @@ def full_jacobian(model: nn.Module, x: t.Tensor) -> t.Tensor:
 
 def class_jacobian(model: nn.Module, x: t.Tensor, class_idx: int) -> t.Tensor:
     """
-    Return J_class of shape (N, P) for the specified output index.
+    Same as full_jacobian but returns J_class of shape (N, P) on the specified output index.
     """
 
     j_full = full_jacobian(model, x)
@@ -44,8 +50,15 @@ def class_jacobian(model: nn.Module, x: t.Tensor, class_idx: int) -> t.Tensor:
 
 def empirical_ntk(model: nn.Module, x_1: t.Tensor, x_2: t.Tensor) -> t.Tensor:
     """
-    Returns NTK(x_1, x_2), of shape (N_1, N_2, C_1, C_2)
-    where N_1 = len(x_1), N_2= len(x_2) and C_* are the output dims.
+    Computes the empirical NTK.
+
+    Args:
+        model: a Pytorch nn.Module.
+        x_1: t.Tensor with shape (N_1, *S) for S the input shape usually expected by the model.
+        x_2: t.Tensor with shape (N_2, *S) for S the input shape usually expected by the model.
+
+    Returns:
+        NTK: t.Tensor of shape (N_1, N_2, C, C) for C the number of ouput dimensions expected by the model.
     """
     # TODO: Could replace jacrev+vmap block with full_jacobian.
 
@@ -131,17 +144,24 @@ class LinearisedPredictor:
             return (K_q @ self.alpha).reshape(B, self.C)
 
 
-def eig_decompose(ntk: t.Tensor, topk: int | None = None) -> tuple[t.Tensor, t.Tensor]:
+def eig_decompose(
+    ntk: t.Tensor, topk: int | None = None, ridge: float = 1e-8
+) -> tuple[t.Tensor, t.Tensor]:
     """
     Return the top k eigenvalues and eigenvectors of a NTK matrix.
 
-    Input: ntk = (N, N) t.Tensor
-    Output: eigvals = (m,) t. Tensor (m = N or topk)
-    Output: eigvecs = (N,m)t. Tensor
+    Args:
+        NTK  : t.Tensor with shape (N, N).
+        topk : int
+        ridge: float
+
+    Returns:
+        eigvals : t.Tensor with shape (m,) | m = N or topk
+        eigvecs : t.Tensor with shape (N,m)
     """
     # Condition with small ridge
     diag_mean = ntk.diag().mean()
-    ntk += 1e-8 * diag_mean * t.eye(ntk.shape[0], device=ntk.device)
+    ntk += ridge * diag_mean * t.eye(ntk.shape[0], device=ntk.device)
 
     eigvals, eigvecs = t.linalg.eigh(ntk)
 
