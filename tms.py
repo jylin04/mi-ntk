@@ -92,7 +92,7 @@ def importance_weighted_loss(
     return (importance * (input - labels) ** 2).mean()
 
 
-def importance_weighted_mse_loss(
+def importance_weighted_bce_loss(
     input: t.Tensor, labels: t.Tensor, importance: t.Tensor
 ) -> t.Tensor:
     """
@@ -100,9 +100,9 @@ def importance_weighted_mse_loss(
     labels: (batch, n_features)
     importnce: (n_features)
 
-    Returns the average value of I_i * BCE(logit_i, label_i)
+    Returns the average value of I_i * BCE_with_logits(logit_i, label_i)
     """
-    return F.binary_cross_entropy(input, labels, weight=importance).mean()
+    return F.binary_cross_entropy_with_logits(input, labels, weight=importance)
 
 
 def train_tms(
