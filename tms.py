@@ -165,4 +165,3 @@ def train_tms_fixed(
     opt.step()
 
     return loss
-# %%
