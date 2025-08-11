@@ -10,6 +10,9 @@ The main changes in the latter are that compared to vanilla TMS we
 
 import torch as t
 import torch.nn as nn
+import torch.nn.functional as F
+
+from typing import Callable
 
 
 # --------- Model ---------
@@ -89,6 +92,19 @@ def importance_weighted_loss(
     return (importance * (input - labels) ** 2).mean()
 
 
+def importance_weighted_mse_loss(
+    input: t.Tensor, labels: t.Tensor, importance: t.Tensor
+) -> t.Tensor:
+    """
+    input: (batch, n_features)
+    labels: (batch, n_features)
+    importnce: (n_features)
+
+    Returns the average value of I_i * BCE(logit_i, label_i)
+    """
+    return F.binary_cross_entropy(input, labels, weight=importance).mean()
+
+
 def train_tms(
     model: nn.Module,
     opt: t.optim.Optimizer,
@@ -97,6 +113,9 @@ def train_tms(
     S: float = 0.9,
     I: float = 0.9,
     device: str = "cpu",
+    loss_fn: Callable[
+        [t.Tensor, t.Tensor, t.Tensor], t.Tensor
+    ] = importance_weighted_loss,
 ) -> t.Tensor:
     """
     Trains the model on the TMS data and loss function for one epoch and returns the average loss.
@@ -108,7 +127,7 @@ def train_tms(
     # Training loop
     opt.zero_grad()
     out = model(data)
-    loss = importance_weighted_loss(
+    loss = loss_fn(
         out,
         data,
         t.tensor(I, device=data.device) ** t.arange(n_features, device=data.device),
@@ -120,7 +139,13 @@ def train_tms(
 
 
 def train_tms_fixed(
-    model: nn.Module, dataset: t.Tensor, opt: t.optim.Optimizer, I: float = 0.9
+    model: nn.Module,
+    dataset: t.Tensor,
+    opt: t.optim.Optimizer,
+    I: float = 0.9,
+    loss_fn: Callable[
+        [t.Tensor, t.Tensor, t.Tensor], t.Tensor
+    ] = importance_weighted_loss,
 ) -> t.Tensor:
     """
     Trains the model on the given dataset for one epoch and returns the average loss.
@@ -130,7 +155,7 @@ def train_tms_fixed(
     # Training loop
     opt.zero_grad()
     out = model(dataset)
-    loss = importance_weighted_loss(
+    loss = loss_fn(
         out,
         dataset,
         t.tensor(I, device=dataset.device)
@@ -140,3 +165,4 @@ def train_tms_fixed(
     opt.step()
 
     return loss
+# %%
