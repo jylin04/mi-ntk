@@ -8,7 +8,8 @@ import torch as t
 import torch.nn as nn
 
 from functorch import make_functional, jacrev, vmap
-from typing import Tuple
+from typing import Tuple, Dict
+from collections import OrderedDict
 
 
 def full_jacobian(model: nn.Module, x: t.Tensor) -> t.Tensor:
@@ -86,6 +87,65 @@ def empirical_ntk(model: nn.Module, x_1: t.Tensor, x_2: t.Tensor) -> t.Tensor:
     )  # Contract over P in each NTK block
     out = out.sum(0)
     return out
+
+
+def empirical_ntk_by_layer(
+    model: nn.Module, x_1: t.Tensor, x_2: t.Tensor
+) -> "OrderedDict[str, t.Tensor]":
+    """
+    Computes the empirical NTK, separated by (groups of) layers.
+
+    Args:
+        model: a Pytorch nn.Module.
+        x_1: shape (N1, *S) for S the input shape usually expected by the model.
+        x_2: shape (N2, *S)
+
+    Returns:
+        OrderedDict[group_name, t.Tensor] each of shape (N_1, N_2, C, C).
+    """
+    model = model.eval()
+    fmodel, params = make_functional(model)
+
+    param_names = [name for name, _ in model.named_parameters()]
+
+    # Function to remove the part of name after the last "."
+    def group_fn(name):
+        return name.rsplit(".", 1)[0]
+
+    group_keys = [
+        group_fn(n) for n in param_names
+    ]  # e.g. ["layer1", "layer1", "layer2"]
+
+    # Function that runs a single example
+    def fnet_single(params: Tuple[t.Tensor, ...], x: t.Tensor) -> t.Tensor:
+        return fmodel(params, x.unsqueeze(0)).squeeze(0)
+
+    # Jacobians. jacrev returns a per-sample function jac_fn(params, x) -> Tuple[T.Tensor, ...].
+    # vmap vectorizes it letting us loop over the batch.
+    jac1 = vmap(jacrev(fnet_single), (None, 0))(
+        params, x_1
+    )  # Each shape (N_1, C, *param_i.shape)
+    jac2 = vmap(jacrev(fnet_single), (None, 0))(params, x_2)
+
+    # Initialize the dictionary
+    out_by_group: "OrderedDict[str, t.Tensor]" = OrderedDict()
+    for g in group_keys:
+        if g not in out_by_group:
+            out_by_group[g] = None  # lazy init so we know shape
+
+    # Populate the dictionary
+    for j1, j2, g in zip(jac1, jac2, group_keys):
+        j1 = j1.flatten(start_dim=2)  # [N1, C, P_i]
+        j2 = j2.flatten(start_dim=2)  # [N2, C, P_i]
+        contrib = t.einsum("Ncp,Mdp->NMcd", j1, j2)  # [N1, N2, C, C]
+        if out_by_group[g] is None:
+            out_by_group[g] = contrib
+        else:
+            out_by_group[g] = (
+                out_by_group[g] + contrib
+            )  # Since we sum over contributions from all parameters [within layer]
+
+    return out_by_group
 
 
 class LinearisedPredictor:
