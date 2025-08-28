@@ -7,7 +7,7 @@ import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import Tuple
+from typing import Tuple, Optional
 
 
 # --------- Model ---------
@@ -77,3 +77,21 @@ def build_mod_arith_data(
     y = F.one_hot(y_idx, num_classes=p).float()
 
     return x, y, y_idx, digits
+
+
+
+def build_mod_arith_data_symbreak(p: int, device = Optional[t.device] = None) -> Tuple[t.Tensor, t.Tensor, t.Tensor, t.Tensor]:
+  """
+  Returns
+  x: (p^2, 2*p)     p^2 unique data points of concatenated cyclic embeddings of two integers m,n.
+  y: (p^2, p)       One-hot labels.
+  y_idx: (p^2,)     Labels.
+  digits: (p^2, 2)  Pairs of integers (m,n).
+  """
+  device = device or t.device("cuda" if t.cuda.is_available() else "cpu")
+
+  digits = t.cartesian_prod(t.arange(p, device=device), t.arange(p, device=device))
+  n = digits[:, 0]
+  m = digits[:, 1]
+
+  # Create two random, zero-mean unit-norm vectors of 
