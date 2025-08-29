@@ -87,6 +87,7 @@ def build_mod_arith_data(
 
 def build_mod_arith_data_symbreak(p: int, symmetric: bool = False, device: Optional[t.device] = None) -> Tuple[t.Tensor, t.Tensor, t.Tensor, t.Tensor]:
   """
+  Embed input integers as a cyclic rotation of a random vector to break symmetry. Idea from Kunin et al. "Alternating Gradient Flows" https://arxiv.org/abs/2506.06489 
   Returns
   x: (p^2, 2*p)     p^2 unique data points of concatenated cyclic embeddings of two integers m,n.
   y: (p^2, p)       One-hot labels.
