@@ -321,3 +321,50 @@ def learn_dictionary_supervised(
         opt.step()
 
     return A.detach(), S.detach(), head
+
+
+
+# --------- Modular arithmetic specific disentanglement algorithm ---------
+def axis_laplacians_pxp(p: int, device=None) -> tuple[t.Tensor, t.Tensor]:
+    """
+    Return axis Laplacians on a periodic p x p grid (torus) lifted to flattened coordinates with i = n*p+m.
+    The 1d Laplacian is defined as L = D - W = 2I - shift(+1) - shift(-1) = 1/2 sum_ij W_ij (x_i - x_j)^2
+    for D= diag(d_1, ... d_n); d_i = sum_j W_ij, with W_ij the weights of the graph = 1 on edges else 0.
+    """
+    I = t.eye(p, device=device)
+
+    # Implement the 1d Laplacian.
+    L1d = 2 * I.clone()
+    for i in range(p):
+        L1d[i, (i + 1) % p] = -1
+        L1d[i, (i - 1) % p] = -1
+
+    # Lift to flattened p^2 nodes
+    Ln = t.kron(L1d, I)  # vary n (penalize variation along n), hold m
+    Lm = t.kron(I, L1d)  # hold n, vary m (penalize variation along m).
+    return Ln, Lm  # Each shape (p^2,p^2).
+
+
+def two_stage_axis_diagonalization(
+    c1: t.Tensor, L1: t.Tensor, L2: t.Tensor
+) -> t.Tensor:
+    """
+    First diagonalize L1 inside span(c1) -> sort by n-frequency.
+    Then within the 0-eigenvalue eigenspace of L1, diagonalize L2 -> sort by m-frequency.
+
+    Return U(N,k): basis of c1 (...)
+    """
+    N, k = c1.shape
+    Q = t.linalg.qr(c1, mode="reduced")[0]
+
+    # Diagonalize L1 inside span(c1) -> sort by n-frequency.
+    An = Q.T @ L1 @ Q
+    vals, vecs_n = t.linalg.eigh(An)
+    Q1 = Q @ vecs_n
+
+    # L1 should have near-degenerate groups of eigenvalues.
+    Bm = Q1[:, : k // 2].T @ L2 @ Q1[:, : k // 2]
+    vals_m, vecs_m = t.linalg.eigh(Bm)
+    Q2 = Q1[:, : k // 2] @ vecs_m
+
+    return t.cat([Q2, Q1[:, k // 2 :]], dim=1)
