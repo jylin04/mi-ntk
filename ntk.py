@@ -40,6 +40,61 @@ def full_jacobian(model: nn.Module, x: t.Tensor) -> t.Tensor:
     return t.cat(jac, dim=2)
 
 
+def jacobian_by_layer(model: nn.Module, x_1: t.Tensor) -> "OrderedDict[str, t.Tensor]":
+    """
+    Computes per-layer Jacobians wrt parameters, evaluated on a batch.
+
+    Args:
+        model: a PyTorch nn.Module.
+        x_1:   t.Tensor with shape (N, *S) for S the input shape usually expected by the model.
+
+    Returns:
+        OrderedDict[group_name, t.Tensor], each of shape (N, C, P_layer).
+    """
+    model = model.eval()
+
+    # Get names BEFORE functionalizing so order matches params later
+    param_names = [name for name, _ in model.named_parameters()]
+
+    fmodel, params = make_functional(model)
+
+    # Function to remove the part of name after the last "."
+    def group_fn(name):
+        return name.rsplit(".", 1)[0]
+
+    group_keys = [
+        group_fn(n) for n in param_names
+    ]  # e.g. ["layer1", "layer1", "layer2"]
+
+    # Function that runs a single example
+    def fnet_single(params: Tuple[t.Tensor, ...], x: t.Tensor) -> t.Tensor:
+        return fmodel(params, x.unsqueeze(0)).squeeze(0)
+
+    # Jacobians. jacrev returns a per-sample function jac_fn(params, x) -> Tuple[T.Tensor, ...].
+    # vmap vectorizes it letting us loop over the batch.
+    jac = vmap(jacrev(fnet_single), (None, 0))(
+        params, x_1
+    )  # Shape (N, C, *param_i.shape)
+
+    # Initialize the dictionary
+    out_by_group: "OrderedDict[str, t.Tensor]" = OrderedDict()
+    for g in group_keys:
+        if g not in out_by_group:
+            out_by_group[g] = None  # lazy init so we know shape
+
+    # Populate the dictionary
+    for j, g in zip(jac, group_keys):
+        j = j.flatten(start_dim=2)  # [N, C, P_i]
+        if out_by_group[g] is None:
+            out_by_group[g] = j
+        else:
+            out_by_group[g] = t.cat(
+                (out_by_group[g], j), dim=2
+            )  # Since we sum over contributions from all parameters [within layer]
+
+    return out_by_group
+
+
 def class_jacobian(model: nn.Module, x: t.Tensor, class_idx: int) -> t.Tensor:
     """
     Same as full_jacobian but returns J_class of shape (N, P) on the specified output index.
@@ -321,7 +376,6 @@ def learn_dictionary_supervised(
         opt.step()
 
     return A.detach(), S.detach(), head
-
 
 
 # --------- Modular arithmetic specific disentanglement algorithm ---------
