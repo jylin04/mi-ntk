@@ -233,11 +233,11 @@ def empirical_ntk_by_layer_cpu(
     N1, N2 = x_1.shape[0], x_2.shape[0]
     device = x_1.device
 
-    # Function that runs a single example (unused, but fine to keep).
+    # Function that runs a single example
     def fnet_single(params_tuple: Tuple[t.Tensor, ...], x: t.Tensor) -> t.Tensor:
         return fmodel(params_tuple, x.unsqueeze(0)).squeeze(0)
 
-    # Function that runs a single example over a subset of classes
+    # Function that runs a single example over a subset of class labels
     # and depends ONLY on a single parameter tensor w, treating the others as constants (detached/no grad).
     def fnet_one_param(param_index: int, class_slice: slice):
         def f_only_w(w: t.Tensor, x: t.Tensor) -> t.Tensor:
@@ -263,7 +263,7 @@ def empirical_ntk_by_layer_cpu(
         jac_fn = vmap(jacrev(f_w), (None, 0))
         return jac_fn(params[param_index], x)
 
-    # Initialize the dictionary - on CPU to avoid holding huge tensors on GPU.
+    # Initialize the dictionary on CPU
     out_by_group: "OrderedDict[str, t.Tensor]" = OrderedDict()
     for g in group_keys:
         if g not in out_by_group:
