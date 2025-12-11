@@ -8,7 +8,7 @@ import torch as t
 import torch.nn as nn
 
 from functorch import make_functional, jacrev, vmap
-from typing import Tuple, Dict
+from typing import Tuple, List, Dict
 from collections import OrderedDict
 
 
@@ -199,6 +199,129 @@ def empirical_ntk_by_layer(
             out_by_group[g] = (
                 out_by_group[g] + contrib
             )  # Since we sum over contributions from all parameters [within layer]
+
+    return out_by_group
+
+
+def empirical_ntk_by_layer_cpu(
+    model: nn.Module,
+    x_1: t.Tensor,
+    x_2: t.Tensor,
+    *,
+    n1_chunk: int = 64,
+    n2_chunk: int = 64,
+    c1_chunk: int = 8,
+    c2_chunk: int = 8,
+) -> "OrderedDict[str, t.Tensor]":
+    """
+    Memory-lean empirical NTK by layer.
+    Processes (params, N1, N2, C1, C2) in tiles, accumulating outputs on CPU to keep GPU footprint small.
+
+    Returns: OrderedDict[group_name, t.Tensor] each of shape (N_1, N_2, C, C) on CPU.
+    """
+    model = model.eval()
+    fmodel, params = make_functional(model)
+
+    param_items: List[Tuple[str, t.Tensor]] = list(model.named_parameters())
+    param_names = [n for n, _ in param_items]
+    group_keys = [n for n in param_names]
+
+    # Retrieve values of N_1, N_2, C.
+    with t.no_grad():
+        out_shape = fmodel(params, x_1[:1]).shape
+        C = out_shape[-1]
+    N1, N2 = x_1.shape[0], x_2.shape[0]
+    device = x_1.device
+
+    # Function that runs a single example (unused, but fine to keep).
+    def fnet_single(params_tuple: Tuple[t.Tensor, ...], x: t.Tensor) -> t.Tensor:
+        return fmodel(params_tuple, x.unsqueeze(0)).squeeze(0)
+
+    # Function that runs a single example over a subset of classes
+    # and depends ONLY on a single parameter tensor w, treating the others as constants (detached/no grad).
+    def fnet_one_param(param_index: int, class_slice: slice):
+        def f_only_w(w: t.Tensor, x: t.Tensor) -> t.Tensor:
+            param_list = list(params)
+            param_list[param_index] = w
+            for k, p in enumerate(param_list):
+                if k != param_index:
+                    param_list[k] = p.detach()
+
+            # Call the model with frozen parameters on a batch of size 1 then drop the batch dim
+            y = fmodel(tuple(param_list), x.unsqueeze(0))  # shape (1, C)
+            y = y.squeeze(0)  # shape (C)
+            return y[class_slice]  # shape (c_block)
+
+        return f_only_w
+
+    # Jacobian for ONLY a single parameter tensor w, over a class and dataset slice
+    def jacobian_one_param(
+        param_index: int, class_slice: slice, x: t.Tensor
+    ) -> t.Tensor:
+        """Output shape: [n, c_block, *param_shape]"""
+        f_w = fnet_one_param(param_index, class_slice)
+        jac_fn = vmap(jacrev(f_w), (None, 0))
+        return jac_fn(params[param_index], x)
+
+    # Initialize the dictionary - on CPU to avoid holding huge tensors on GPU.
+    out_by_group: "OrderedDict[str, t.Tensor]" = OrderedDict()
+    for g in group_keys:
+        if g not in out_by_group:
+            out_by_group[g] = t.zeros((N1, N2, C, C), dtype=t.float32, device="cpu")
+
+    # Populate the dictionary
+    for p_index, (p_name, p_tensor) in enumerate(param_items):
+        group = group_keys[p_index]
+        P_i = (
+            p_tensor.numel()
+        )  # Total number of elements in the parameter tensor; used for flattening.
+
+        # Iterate N_1 and N_2 in tiles.
+        for i in range(0, N1, n1_chunk):
+            x1_slice = x_1[i : i + n1_chunk].to(device, non_blocking=True)
+
+            for j in range(0, N2, n2_chunk):
+                x2_slice = x_2[j : j + n2_chunk].to(device, non_blocking=True)
+
+                # Iterate class indices in tiles.
+                c1_start = 0
+                while c1_start < C:
+                    c1_end = min(c1_start + c1_chunk, C)
+                    c1_slice = slice(c1_start, c1_end)
+
+                    # Jacobian for the current param + N-tile + class block (shape [n1, c1, P_i]):
+                    J1 = jacobian_one_param(p_index, c1_slice, x1_slice)
+                    J1f = J1.flatten(start_dim=2)  # [n1, c1, P_i]
+                    del J1
+
+                    c2_start = 0
+                    while c2_start < C:
+                        c2_end = min(c2_start + c2_chunk, C)
+                        c2_slice = slice(c2_start, c2_end)
+
+                        # Jacobian for this param + N-tile + class block (shape [n2, c2, P_i]):
+                        J2 = jacobian_one_param(p_index, c2_slice, x2_slice)
+                        J2f = J2.flatten(start_dim=2)  # [n2, c2, P_i]
+                        del J2
+
+                        # Contribute this shape [n1, n2, c1, c2] tile to layerwise jacobian for p_name
+                        contrib = t.einsum("ncp,mdp->nmcd", J1f, J2f)  # on GPU
+                        out_by_group[group][
+                            i : i + contrib.shape[0],
+                            j : j + contrib.shape[1],
+                            c1_start:c1_end,
+                            c2_start:c2_end,
+                        ] += contrib.detach().to("cpu")
+
+                        del J2f, contrib
+                        c2_start = c2_end
+
+                    del J1f
+                    c1_start = c1_end
+
+                del x2_slice
+
+            del x1_slice
 
     return out_by_group
 
