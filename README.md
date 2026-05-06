@@ -3,6 +3,8 @@ Code for the paper **Feature Identification via the Empirical NTK**. [https://ar
 
 This repo contains small-scale research code for reproducing the experiments in the paper.
 
+**Important note: The code in this repository accompanies an earlier version of the paper (v3).**
+
 ## What is in this repo
 
 - `ntk.py`: core Jacobian and eNTK utilities and the Laplacian-based rotation helpers used in the modular arithmetic analysis.
