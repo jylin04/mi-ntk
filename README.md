@@ -3,23 +3,22 @@ Code for the paper **Feature Identification via the Empirical NTK**. [https://ar
 
 This repo contains small-scale research code for reproducing the experiments in the paper.
 
-**Important note: The code in this repository accompanies an earlier version of the paper (v3).**
-
 ## What is in this repo
 
-- `ntk.py`: core Jacobian and eNTK utilities and the Laplacian-based rotation helpers used in the modular arithmetic analysis.
+- `ntk.py`: core Jacobian and eNTK utilities used in the modular arithmetic analysis. 
 - `ma.py`: utilities for modular arithmetic MLP experiment.
-- `tms.py`: utilities for TMS experiment
 - `metrics.py`:  comparison utilities for the trained model and its linearized eNTK approximation.
+  
+The utilities for approximate eNTK eigenanalysis on Gemma-3-270M are defined directly in the notebook.
 
 ### Notebooks
 
-- `tms_exploration.ipynb`: Toy Models of Superposition experiments.
-- `modular_arithmetic.ipynb`: modular arithmetic experiments in a 1L MLP.
-- `modular_arithmetic_1L_transformer.ipynb`: modular arithmetic experiments in a 1L Transformer.
+- `modular_arithmetic_v4.ipynb`: modular arithmetic experiments in a 1L MLP.
+- `modular_arithmetic_transformer_v4.ipynb`: modular arithmetic experiments in a 1L Transformer.
+- `gemma_3_270m.ipynb`: approximate eNTK eigenanalysis and comparison to independently-specified grammar features in Gemma-3-270M.
 
 ## Reproducing results
 
-Run the notebooks for the respective sections.
+To reproduce the modular arithmetic results in sections 3 and 4 of the paper, run the respective notebooks. 
 
-*Important note*: some of the multi-panel figures in the paper are assembled from results saved at different training epochs and then displayed together, so they will not be reproduced by a single top-to-bottom notebook run. Conversely, some of the notebook cells containing multi-panel figures will not run as-is (since they call matrices that were saved manually and have since been deleted). However, the individual panels should be reproducible by running the code at the relevant epoch and hyperparameter setting.
+The language model notebook `gemma_3_270m.ipynb` contains the code used to generate the datasets in section 5 of the paper and compute approximate eigendirections of the eNTK one layer at a time. To reproduce Table 3 in the paper, one should compute the eigendirections for all layers and extremize the AUROC score across them. The notebook currently shows the results of computing the AUROC score for a particular model layer (16), that accounts for some of the rows of Table 3. 
